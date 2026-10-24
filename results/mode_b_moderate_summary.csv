@@ -1,0 +1,3 @@
+policy,packets_generated,packets_delivered,packets_dropped,packet_loss_rate,average_queueing_delay,throughput,fairness_index
+tail_drop,469,461,0,0.0,3.69,0.922,0.9468
+priority_displace,469,461,0,0.0,3.69,0.922,0.9468

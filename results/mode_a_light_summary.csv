@@ -1,0 +1,4 @@
+policy,packets_generated,packets_delivered,packets_dropped,packet_loss_rate,average_queueing_delay,throughput,fairness_index
+fifo,202,202,0,0.0,0.153,0.404,0.8766
+static_priority,202,202,0,0.0,0.153,0.404,0.8766
+adaptive_priority,202,202,0,0.0,0.153,0.404,0.8766
