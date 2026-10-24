@@ -79,6 +79,30 @@ def test_priority_displace_tie_evicts_oldest_among_lowest_priority():
     assert remaining_ids == {1, 2}  # id 0 (oldest of the tied lowest) was evicted
 
 
+def test_priority_displace_keeps_queue_in_arrival_order():
+    """FIFO and every FIFO tie-break assume index 0 is the oldest packet.
+    An evicting newcomer must therefore join the back of the queue, not
+    take the evicted packet's slot."""
+    queue = [
+        make_packet(0, TrafficClass.VOICE, 0),
+        make_packet(1, TrafficClass.BACKGROUND, 1),
+        make_packet(2, TrafficClass.VIDEO, 2),
+    ]
+    _admit(queue, make_packet(3, TrafficClass.GAMING, 3), capacity=3, drop_policy="priority_displace")
+    arrival_times = [p.arrival_time for p in queue]
+    assert arrival_times == sorted(arrival_times)
+    assert [p.packet_id for p in queue] == [0, 2, 3]
+
+
+def test_admit_returns_the_dropped_packet():
+    queue = [make_packet(0, TrafficClass.BACKGROUND, 0)]
+    newcomer = make_packet(1, TrafficClass.VOICE, 1)
+    assert _admit(queue, newcomer, capacity=1, drop_policy="priority_displace").packet_id == 0
+    rejected = make_packet(2, TrafficClass.BACKGROUND, 2)
+    assert _admit(queue, rejected, capacity=1, drop_policy="tail_drop") is rejected
+    assert _admit([], make_packet(3, TrafficClass.VOICE, 3), capacity=1, drop_policy="tail_drop") is None
+
+
 def test_admission_never_exceeds_capacity():
     queue: list[Packet] = []
     for i in range(10):
@@ -164,6 +188,70 @@ def test_identical_trace_reused_across_policies():
     fifo_arrivals = sorted((p.packet_id, p.traffic_class, p.arrival_time) for p in fifo_result.packets)
     adaptive_arrivals = sorted((p.packet_id, p.traffic_class, p.arrival_time) for p in adaptive_result.packets)
     assert fifo_arrivals == adaptive_arrivals
+
+
+@pytest.mark.parametrize("scheduler", ["fifo", "static_priority", "adaptive_priority"])
+@pytest.mark.parametrize("drop_policy", ["tail_drop", "priority_displace"])
+def test_replay_matches_the_simulation_it_records(scheduler, drop_policy):
+    config = _small_config(
+        scheduler=scheduler,
+        drop_policy=drop_policy,
+        queue_capacity=4,
+        arrival_rates={TrafficClass.VOICE: 0.6, TrafficClass.BACKGROUND: 0.6},
+    )
+    result = run_simulation(config, replay_steps=60)
+    assert [frame["t"] for frame in result.replay] == list(range(60))
+
+    by_id = {p.packet_id: p for p in result.packets}
+    for frame, (t, utilisation) in zip(result.replay, result.utilisation_history):
+        assert frame["utilisation"] == utilisation
+        # queue at decision time = what is left after service + what was served
+        assert len(frame["queue"]) + len(frame["served"]) == round(utilisation * config.queue_capacity)
+        assert len(frame["queue"]) <= config.queue_capacity
+        queue_arrivals = [q["arrival"] for q in frame["queue"]]
+        assert queue_arrivals == sorted(queue_arrivals)
+        for s in frame["served"]:
+            assert by_id[s["id"]].service_start_time == t
+            assert s["wait"] == t - by_id[s["id"]].arrival_time
+        for d in frame["dropped"]:
+            assert by_id[d["id"]].outcome == "dropped"
+            assert by_id[d["id"]].drop_reason == d["reason"]
+    # every packet served at a recorded step appears in exactly that frame
+    served_in_replay = {s["id"] for frame in result.replay for s in frame["served"]}
+    assert served_in_replay == {p.packet_id for p in result.packets if p.service_start_time is not None and p.service_start_time < 60}
+
+
+def test_replay_scores_use_the_adaptive_formula():
+    config = _small_config(scheduler="adaptive_priority", alpha=0.5, queue_capacity=4,
+                           arrival_rates={TrafficClass.VOICE: 0.7, TrafficClass.BACKGROUND: 0.7})
+    result = run_simulation(config, replay_steps=80)
+    scored = 0
+    for frame in result.replay:
+        alpha_eff = 1.0 if frame["level"] == "high" else 0.5
+        for s in frame["served"]:
+            if frame["level"] == "low":
+                assert "score" not in s
+            else:
+                base = 5 if s["cls"] == "voice" else 1
+                assert s["score"] == pytest.approx(base + alpha_eff * s["wait"])
+                scored += 1
+    assert scored > 0
+
+
+def test_replay_is_empty_by_default_and_bounded_by_duration():
+    assert run_simulation(_small_config()).replay == []
+    assert len(run_simulation(_small_config(duration=10), replay_steps=100).replay) == 10
+
+
+def test_queue_occupancy_is_identical_across_schedulers_under_tail_drop():
+    """Explains a Deep Analysis observation: with the same trace and tail-drop,
+    scheduling changes WHICH packet leaves, never HOW MANY are queued."""
+    trace = generate_trace({TrafficClass.VOICE: 0.6, TrafficClass.BACKGROUND: 0.6}, duration=200, seed=3)
+    histories = [
+        run_simulation(_small_config(scheduler=s), trace=trace).utilisation_history
+        for s in ("fifo", "static_priority", "adaptive_priority")
+    ]
+    assert histories[0] == histories[1] == histories[2]
 
 
 def test_service_rate_above_one_serves_multiple_packets_per_step():

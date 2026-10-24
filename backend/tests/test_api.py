@@ -42,6 +42,34 @@ def test_simulate_with_builtin_scenario():
     assert len(body["queue_utilisation_history"]) == body["config"]["duration"]
 
 
+def test_simulate_returns_bounded_replay():
+    resp = client.post("/api/simulate", json={"scenario": "heavy", "scheduler": "fifo", "seed": 1})
+    replay = resp.json()["replay"]
+    assert len(replay) == 100
+    assert set(replay[0].keys()) == {"t", "utilisation", "level", "arrivals", "dropped", "served", "queue"}
+
+
+def test_custom_scenario_uses_every_submitted_value():
+    """The frontend always submits scenario='custom' with explicit values;
+    the backend must use them rather than any preset."""
+    rates = {c: 0.2 for c in ("voice", "gaming", "video", "normal_data", "file_transfer", "background")}
+    resp = client.post(
+        "/api/simulate",
+        json={"scenario": "custom", "arrival_rates": rates, "queue_capacity": 7, "service_rate": 3,
+              "duration": 123, "scheduler": "static_priority", "alpha": 1.25, "seed": 9, "drop_policy": "priority_displace"},
+    )
+    cfg = resp.json()["config"]
+    assert (cfg["queue_capacity"], cfg["service_rate"], cfg["duration"]) == (7, 3, 123)
+    assert (cfg["scheduler"], cfg["alpha"], cfg["seed"], cfg["drop_policy"]) == ("static_priority", 1.25, 9, "priority_displace")
+    assert len(resp.json()["queue_utilisation_history"]) == 123
+
+
+def test_compare_includes_per_policy_utilisation_history():
+    resp = client.post("/api/compare", json={"mode": "scheduling_only", "scenario": "heavy", "seed": 2})
+    for r in resp.json()["results"].values():
+        assert len(r["utilisation_history"]) == 500
+
+
 def test_simulate_with_custom_scenario():
     rates = {
         "voice": 0.1, "gaming": 0.1, "video": 0.1,

@@ -1,8 +1,8 @@
 # Viva Guide
 
 Likely questions and concise, accurate answers for the oral examination.
-The same explanations also appear in the app's Viva Guide tab; this file is
-for offline review. Numbers quoted below come from `results/*.csv`
+A condensed version appears in the app under Deep Analysis → "Method &
+definitions"; this file is for offline review. Numbers quoted below come from `results/*.csv`
 (seed=42, alpha=0.5) — regenerate with `python backend/run_experiments.py`
 if you want to re-verify them yourself before the viva.
 
@@ -116,16 +116,25 @@ scheduling policy under a single finite buffer — deliberately, so its
 effect can be measured and explained in isolation. It is not a claim about
 real-network behaviour beyond that one mechanism.
 
-### Why does `priority_displace` (Mode B) not always reduce loss?
+### Why does `priority_displace` (Mode B) not reduce total loss?
 
-Because displacement only helps a class when that class would otherwise
-have been tail-dropped. In our heavy-load run, voice was already fully
-protected (0% loss) by scheduling alone — the queue rarely filled with voice
-waiting behind others. So displacement mostly ends up evicting background
-packets for no additional voice benefit, and background's loss rate got
-*worse* (60.75% → 98.13%). This is reported honestly in the README rather
-than dressed up, per the project's explicit instruction not to claim an
-improvement the data doesn't show.
+Because displacement doesn't add buffer space: when the queue is full,
+exactly one packet is still lost — displacement only chooses *which* one.
+Overall loss stays at 31.26% in our heavy-load run. What changes is who
+pays: Gaming loss falls from 15.6% to 0.0% and Video from 34.2% to 2.6%,
+while Normal Data (45.5% → 52.5%), File Transfer (52.1% → 78.7%) and
+Background (60.7% → 98.1%) lose more. Voice gains nothing because
+scheduling alone already gave it 0% loss. It is a trade-off between classes,
+not an improvement, and the project reports it that way.
+
+### Why is queue occupancy identical for every scheduler in Mode A?
+
+In Mode A every policy sends exactly `service_rate` packets per step whenever
+the queue is non-empty, and admission depends only on how many packets are
+queued. So the queue *length* evolves identically for FIFO, static and
+adaptive (`test_queue_occupancy_is_identical_across_schedulers_under_tail_drop`);
+only *which* packets are inside differs. That is also why their overall loss
+and throughput match.
 
 ### Why was Python's standard library used instead of NumPy/pandas for the simulation?
 

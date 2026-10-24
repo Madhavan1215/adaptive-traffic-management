@@ -125,7 +125,16 @@ def _build_config(scenario: dict, scheduler: str, alpha: float, seed: int, drop_
     )
 
 
-def run_mode_a_from_config(scenario: dict, alpha: float = 0.5, seed: int = 42) -> dict[str, dict]:
+def _summarize_run(result: SimulationResult, include_history: bool) -> dict:
+    summary = summarize(result)
+    if include_history:
+        summary["utilisation_history"] = [u for _, u in result.utilisation_history]
+    return summary
+
+
+def run_mode_a_from_config(
+    scenario: dict, alpha: float = 0.5, seed: int = 42, include_history: bool = False
+) -> dict[str, dict]:
     """All three policies run on the SAME arrival trace, SAME capacity,
     SAME service rate, SAME (tail-drop) admission rule -- isolating the
     effect of scheduling order on delay/throughput/fairness, not loss.
@@ -135,20 +144,20 @@ def run_mode_a_from_config(scenario: dict, alpha: float = 0.5, seed: int = 42) -
     results: dict[str, dict] = {}
     for scheduler in ("fifo", "static_priority", "adaptive_priority"):
         config = _build_config(scenario, scheduler, alpha, seed, drop_policy="tail_drop")
-        result = run_simulation(config, trace=trace)
-        results[scheduler] = summarize(result)
+        results[scheduler] = _summarize_run(run_simulation(config, trace=trace), include_history)
     return results
 
 
-def run_mode_b_from_config(scenario: dict, alpha: float = 0.5, seed: int = 42) -> dict[str, dict]:
+def run_mode_b_from_config(
+    scenario: dict, alpha: float = 0.5, seed: int = 42, include_history: bool = False
+) -> dict[str, dict]:
     """Adaptive scheduler only, comparing plain tail-drop admission against
     class-aware priority_displace admission, under identical offered load."""
     trace = generate_trace(scenario["arrival_rates"], scenario["duration"], seed)
     results: dict[str, dict] = {}
     for drop_policy in ("tail_drop", "priority_displace"):
         config = _build_config(scenario, "adaptive_priority", alpha, seed, drop_policy=drop_policy)
-        result = run_simulation(config, trace=trace)
-        results[drop_policy] = summarize(result)
+        results[drop_policy] = _summarize_run(run_simulation(config, trace=trace), include_history)
     return results
 
 

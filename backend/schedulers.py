@@ -49,6 +49,14 @@ def select_static_priority(queue: list[Packet], current_time: int) -> int:
     return best_idx
 
 
+def adaptive_score(packet: Packet, current_time: int, alpha: float, utilisation: float) -> float:
+    """Priority Score = base_priority + alpha_effective * waiting_time, where
+    alpha_effective doubles under high congestion. Only meaningful at
+    moderate/high congestion; at low congestion the scheduler is FIFO-like."""
+    alpha_effective = alpha * 2 if congestion_level(utilisation) == "high" else alpha
+    return packet.base_priority + alpha_effective * packet.waiting_time(current_time)
+
+
 def select_adaptive_priority(queue: list[Packet], current_time: int, alpha: float, utilisation: float) -> int:
     """Adaptive scheduler: Priority Score = base_priority + alpha * waiting_time.
 
@@ -59,19 +67,13 @@ def select_adaptive_priority(queue: list[Packet], current_time: int, alpha: floa
     Ties in score (including the "low" congestion case) break in FIFO order,
     via the same strictly-greater-only replacement rule as static priority.
     """
-    level = congestion_level(utilisation)
-    if level == "low":
+    if congestion_level(utilisation) == "low":
         return select_fifo(queue, current_time)
 
-    alpha_effective = alpha * 2 if level == "high" else alpha
-
-    def score(p: Packet) -> float:
-        return p.base_priority + alpha_effective * p.waiting_time(current_time)
-
     best_idx = 0
-    best_score = score(queue[0])
+    best_score = adaptive_score(queue[0], current_time, alpha, utilisation)
     for i in range(1, len(queue)):
-        s = score(queue[i])
+        s = adaptive_score(queue[i], current_time, alpha, utilisation)
         if s > best_score:
             best_idx = i
             best_score = s

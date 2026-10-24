@@ -24,6 +24,9 @@ app.add_middleware(
 )
 
 MAX_PACKET_SAMPLES = 200
+# Recorded per-step event log for the Studio's queue replay. Bounded so the
+# response stays small; the full run still covers `duration` steps.
+REPLAY_STEPS = 100
 
 ALGORITHM_INFO = {
     "fifo": {
@@ -121,7 +124,7 @@ def simulate(request: SimulationRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    result = run_simulation(config)
+    result = run_simulation(config, replay_steps=REPLAY_STEPS)
     summary = summarize(result)
 
     packet_samples = [
@@ -152,6 +155,7 @@ def simulate(request: SimulationRequest) -> dict:
         "summary": summary,
         "queue_utilisation_history": result.utilisation_history,
         "packet_samples": packet_samples,
+        "replay": result.replay,
     }
 
 
@@ -164,10 +168,8 @@ def compare(request: CompareRequest) -> dict:
         raise HTTPException(status_code=422, detail="arrival_rates is required for a custom scenario")
 
     try:
-        if request.mode == CompareMode.SCHEDULING_ONLY:
-            results = run_mode_a_from_config(scenario, alpha=request.alpha, seed=request.seed)
-        else:
-            results = run_mode_b_from_config(scenario, alpha=request.alpha, seed=request.seed)
+        run_mode = run_mode_a_from_config if request.mode == CompareMode.SCHEDULING_ONLY else run_mode_b_from_config
+        results = run_mode(scenario, alpha=request.alpha, seed=request.seed, include_history=True)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

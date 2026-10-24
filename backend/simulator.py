@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from schedulers import SCHEDULERS
+from schedulers import SCHEDULERS, adaptive_score, congestion_level
 from traffic import ArrivalGenerator, Packet, TrafficClass
 
 # A trace is a flat, order-independent list of raw arrival facts. Using plain
@@ -67,20 +67,22 @@ class SimulationResult:
     packets: list[Packet] = field(default_factory=list)
     # (time_step, utilisation_fraction_in_[0,1]) recorded once per step, after admission.
     utilisation_history: list[tuple[int, float]] = field(default_factory=list)
+    replay: list[dict] = field(default_factory=list)
 
 
-def _admit(queue: list[Packet], packet: Packet, capacity: int, drop_policy: str) -> None:
-    """Try to admit `packet`. Mutates `queue` in place and sets
-    outcome/drop_reason on whichever single packet ends up dropped (either
-    the newcomer, or -- under priority_displace -- the evicted packet)."""
+def _admit(queue: list[Packet], packet: Packet, capacity: int, drop_policy: str) -> Packet | None:
+    """Try to admit `packet`. Mutates `queue` in place, sets outcome/drop_reason
+    on whichever single packet ends up dropped (the newcomer, or -- under
+    priority_displace -- the evicted packet), and returns it (None if nothing
+    was dropped)."""
     if len(queue) < capacity:
         queue.append(packet)
-        return
+        return None
 
     if drop_policy == "tail_drop":
         packet.outcome = "dropped"
         packet.drop_reason = "buffer_full"
-        return
+        return packet
 
     # priority_displace: an arriving packet with strictly higher base
     # priority than the worst-off queued packet evicts it. Ties for
@@ -91,16 +93,52 @@ def _admit(queue: list[Packet], packet: Packet, capacity: int, drop_policy: str)
     if packet.base_priority > worst.base_priority:
         worst.outcome = "dropped"
         worst.drop_reason = "displaced"
-        queue[worst_idx] = packet
-    else:
-        packet.outcome = "dropped"
-        packet.drop_reason = "buffer_full"
+        # Newcomer joins the back so the queue stays in arrival order, which
+        # FIFO selection and every FIFO tie-break rely on.
+        queue.pop(worst_idx)
+        queue.append(packet)
+        return worst
+    packet.outcome = "dropped"
+    packet.drop_reason = "buffer_full"
+    return packet
 
 
-def run_simulation(config: SimulationConfig, trace: list[ArrivalSpec] | None = None) -> SimulationResult:
+def _replay_frame(
+    t: int,
+    utilisation: float,
+    config: SimulationConfig,
+    arrivals: list[Packet],
+    dropped: list[Packet],
+    served: list[Packet],
+    queue: list[Packet],
+) -> dict:
+    """One step of the recorded event log used by the frontend to replay the
+    queue. Everything here is read from the packets the loop just processed."""
+    served_records = []
+    for p in served:
+        record = {"id": p.packet_id, "cls": p.traffic_class.value, "arrival": p.arrival_time, "wait": p.waiting_time(t)}
+        if config.scheduler == "adaptive_priority" and congestion_level(utilisation) != "low":
+            record["score"] = round(adaptive_score(p, t, config.alpha, utilisation), 3)
+        served_records.append(record)
+    return {
+        "t": t,
+        "utilisation": utilisation,
+        "level": congestion_level(utilisation),
+        "arrivals": [{"id": p.packet_id, "cls": p.traffic_class.value} for p in arrivals],
+        "dropped": [{"id": p.packet_id, "cls": p.traffic_class.value, "reason": p.drop_reason} for p in dropped],
+        "served": served_records,
+        "queue": [{"id": p.packet_id, "cls": p.traffic_class.value, "arrival": p.arrival_time} for p in queue],
+    }
+
+
+def run_simulation(
+    config: SimulationConfig, trace: list[ArrivalSpec] | None = None, replay_steps: int = 0
+) -> SimulationResult:
     """Run one full simulation. If `trace` is given (from generate_trace),
     it is replayed with fresh Packet objects so the exact same arrivals can
-    be reused across multiple policies/configs without cross-contamination."""
+    be reused across multiple policies/configs without cross-contamination.
+    If `replay_steps` > 0, a per-step event log of the first `replay_steps`
+    steps is recorded in `result.replay` (bounded so responses stay small)."""
     if trace is None:
         trace = generate_trace(config.arrival_rates, config.duration, config.seed)
 
@@ -112,18 +150,23 @@ def run_simulation(config: SimulationConfig, trace: list[ArrivalSpec] | None = N
     queue: list[Packet] = []
     all_packets: list[Packet] = []
     utilisation_history: list[tuple[int, float]] = []
+    replay: list[dict] = []
 
     for t in range(config.duration):
         # Steps 1-2: arrivals + admission.
+        dropped_now: list[Packet] = []
         for packet in arrivals_by_step[t]:
             all_packets.append(packet)
-            _admit(queue, packet, config.queue_capacity, config.drop_policy)
+            dropped = _admit(queue, packet, config.queue_capacity, config.drop_policy)
+            if dropped is not None:
+                dropped_now.append(dropped)
 
         # Steps 3-4: congestion level (derived from utilisation) + history.
         utilisation = len(queue) / config.queue_capacity
         utilisation_history.append((t, utilisation))
 
         # Steps 5-6: select and serve up to service_rate packets this step.
+        served_now: list[Packet] = []
         for _ in range(config.service_rate):
             if not queue:
                 break
@@ -135,5 +178,11 @@ def run_simulation(config: SimulationConfig, trace: list[ArrivalSpec] | None = N
             served.service_start_time = t
             served.departure_time = t
             served.outcome = "delivered"
+            served_now.append(served)
 
-    return SimulationResult(config=config, packets=all_packets, utilisation_history=utilisation_history)
+        if t < replay_steps:
+            replay.append(_replay_frame(t, utilisation, config, arrivals_by_step[t], dropped_now, served_now, queue))
+
+    return SimulationResult(
+        config=config, packets=all_packets, utilisation_history=utilisation_history, replay=replay
+    )

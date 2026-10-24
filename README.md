@@ -9,7 +9,7 @@ measures how each affects packet loss, delay, throughput, and fairness.
 > on an actual network, and does not change traffic anywhere outside this
 > program. See [Limitations](#limitations).
 
-![Dashboard](docs/screenshots/dashboard.jpg)
+![Home page](docs/screenshots/home.jpg)
 
 ## 1. Problem statement
 
@@ -34,8 +34,9 @@ simpler baselines, and under what conditions?
    Jain's fairness index from real simulation output — never hardcoded.
 4. Demonstrate, with evidence, that waiting-time aging prevents starvation
    under the adaptive policy, and that static priority does **not**.
-5. Present it through a small, explainable dashboard suitable for a live
-   classroom demo and a detailed oral exam (viva).
+5. Present it through a small, explainable web app — **Home** (what the
+   project is), **Studio** (run one simulation and replay the queue) and
+   **Deep Analysis** (compare policies) — suitable for a live classroom demo.
 
 ## 3. Architecture
 
@@ -51,11 +52,13 @@ adaptive-traffic-management/
 │   ├── experiments.py    Scenarios, Mode A/B comparisons, CSV export
 │   ├── run_experiments.py  Regenerates results/ from scratch
 │   ├── requirements.txt
-│   └── tests/            61 unit tests + 11 API tests (pytest)
+│   └── tests/            86 pytest tests (engine, metrics, experiments, API)
 ├── frontend/
 │   └── src/
-│       ├── pages/        Dashboard, Compare, Viva
-│       ├── components/   ConfigPanel, MetricCards, QueueView, charts/
+│       ├── pages/        Home, Studio, Analysis (Deep Analysis)
+│       ├── components/   home/, studio/, analysis/, charts/ + shared UI
+│       ├── lib/          config state, result explanations, CSV export (+ vitest tests)
+│       ├── hooks/        hash routing, simulation state, frame-driven timers
 │       └── api/          Thin fetch wrapper around the backend
 ├── results/               CSV output from run_experiments.py (real, not invented)
 └── docs/screenshots/
@@ -65,6 +68,16 @@ The scheduling modules (`schedulers.py`) never touch admission or drops —
 that boundary is deliberate (see [Section 5](#5-why-scheduling-and-buffer-admission-are-kept-separate)).
 `main.py` only validates requests and calls into `simulator`/`metrics`/`experiments`;
 no scheduling logic lives in the API layer.
+
+**How the frontend talks to the engine.** The Studio keeps one configuration
+object in React state; presets only fill in arrival rates. Every run sends
+the full configuration explicitly (`scenario: "custom"`), so the backend
+never substitutes preset values. `/api/simulate` also returns a bounded
+per-step event log (`replay`, first 100 steps) recorded inside the
+simulation loop; the Studio's queue animation plays back exactly those
+events. `/api/compare` returns each policy's utilisation history for the
+over-time chart. All explanatory sentences in the UI are generated from the
+returned numbers (`frontend/src/lib/insights.js`).
 
 ## 4. Algorithms
 
@@ -179,8 +192,13 @@ npm run dev
 ```
 
 The dev server proxies `/api` to `http://127.0.0.1:8000`, so both must be
-running. Open the URL Vite prints (defaults to `http://localhost:5173`,
-configured here to `5842` to avoid a port clash — see `vite.config.js`).
+running. Open `http://localhost:5842` (set in `vite.config.js` to avoid a
+port clash).
+
+> **Port 8000 must be free.** If another FastAPI app is already using it,
+> the Studio shows "The simulation API wasn't found on port 8000". Stop the
+> other server, or run this backend on another port and change the proxy
+> target in `vite.config.js` to match.
 
 ## 10. Testing
 
@@ -190,14 +208,28 @@ source .venv/bin/activate
 pytest -q
 ```
 
-72 tests (`test_traffic.py`, `test_schedulers.py`, `test_simulator.py`,
+86 tests (`test_traffic.py`, `test_schedulers.py`, `test_simulator.py`,
 `test_metrics.py`, `test_experiments.py`, `test_api.py`), all passing as of
 the last run. Coverage includes FIFO order, static-priority ordering and
 starvation risk, adaptive behaviour at each congestion tier, adaptive
-starvation *prevention*, queue capacity enforcement, drop accounting with no
-double-counting, non-negative queueing delay, deterministic seeded runs,
-identical traces across Mode A policies, empty/zero traffic, and API
-validation (422s) for malformed requests.
+starvation *prevention*, queue capacity enforcement, arrival order preserved
+under priority displacement, drop accounting with no double-counting,
+non-negative queueing delay, deterministic seeded runs, identical traces
+across Mode A policies, the replay log matching the run it records, empty
+traffic, and API validation (422s) for malformed requests.
+
+Frontend logic tests (vitest) run against real backend responses saved in
+`frontend/src/lib/__fixtures__/`:
+
+```bash
+cd frontend
+npm test
+```
+
+They check that presets change the actual request, that edited rates become
+"custom", that reset restores the initial state, that every generated
+explanation matches the data it describes (and stays silent when the data
+doesn't support it), and that the CSV export contains the real metrics.
 
 ## 11. Experiment methodology
 
@@ -241,19 +273,18 @@ favouring high-priority traffic under congestion.
 
 **Mode B, heavy load** — adaptive scheduler, admission policy varied:
 
-| Drop policy | Overall loss | Voice loss | Background loss |
-|---|---|---|---|
-| tail_drop | 31.26% | 0.00% | 60.75% |
-| priority_displace | 31.26% | 0.00% | **98.13%** |
+| Drop policy | Overall | Voice | Gaming | Video | Normal Data | File Transfer | Background |
+|---|---|---|---|---|---|---|---|
+| tail_drop | 31.26% | 0.0% | 15.6% | 34.2% | 45.5% | 52.1% | 60.7% |
+| priority_displace | 31.26% | 0.0% | **0.0%** | **2.6%** | 52.5% | 78.7% | **98.1%** |
 
-This is an honest result, not a flattering one: under this particular
-seed/load, class-aware displacement made background loss *worse*, not
-better, while overall loss was unchanged. (At this load, voice is already
-fully protected by scheduling alone, so displacement sacrifices more
-background packets for no additional voice benefit.) Results vary by seed —
+Overall loss is unchanged: displacement decides *which* packet is lost, it
+does not create room. It shifts loss away from higher-priority classes and
+onto lower-priority ones: Gaming and Video losses fall sharply, while Normal Data,
+File Transfer and especially Background lose more. Voice was already fully
+protected by scheduling alone, so it gains nothing. Results vary by seed;
 `backend/tests/test_experiments.py` only asserts voice loss never gets
-*worse* under displacement, which holds; it does not assert background loss
-improves, because it sometimes doesn't.
+*worse* under displacement, and nothing claims overall loss improves.
 
 See `results/*.csv` for the full numbers across all three scenarios and both
 modes, and `results/heavy_adaptive_priority_packets.csv` for a full
@@ -261,28 +292,35 @@ packet-level trace.
 
 ## 12. Screenshots
 
-| Dashboard | Compare | Viva Guide |
+| Home | Studio | Deep Analysis |
 |---|---|---|
-| ![Dashboard](docs/screenshots/dashboard.jpg) | ![Compare](docs/screenshots/compare.jpg) | ![Viva](docs/screenshots/viva.jpg) |
+| ![Home](docs/screenshots/home.jpg) | ![Studio](docs/screenshots/studio.jpg) | ![Deep Analysis](docs/screenshots/analysis.jpg) |
 
 To capture new ones: run both servers, open the app, run a simulation /
-comparison, and screenshot each tab.
+comparison, and screenshot each page.
 
 ## 13. Demonstration sequence (suggested, ~5 minutes)
 
-1. **Dashboard, Moderate scenario, Adaptive priority** — run it. Point out
-   0% loss (load is just under capacity) and the utilisation chart hovering
-   below 100%.
-2. **Switch scenario to Heavy, re-run** — loss jumps, utilisation pins near
-   100%. Point out per-class delay and drop charts.
-3. **Compare tab, Mode A, Heavy** — run it. Point at the comparison table:
-   same loss across all three, but background's delay explodes under static
-   priority (197+ steps) while adaptive keeps it close to FIFO.
-4. **Compare tab, Mode B, Heavy** — run it. Discuss the honest result: loss
-   didn't improve overall, and explain why (see Section 11).
-5. **Viva Guide tab** — walk through the worked example table: same queue,
-   three different winners under FIFO / static / adaptive, with the exact
-   score arithmetic shown.
+1. **Home** — the hero animation shows the whole idea (packets in → finite
+   queue → scheduler → link; it is labelled as an illustration). Scroll to
+   "Who gets sent next?" and toggle *2 steps / 10 steps*: FIFO and Static
+   never change their pick, Adaptive flips once Background has waited long
+   enough.
+2. **Studio, Moderate, Adaptive** — run it. The replay plays the recorded
+   steps; the decision line mostly reads "the oldest packet, because the
+   queue is under half full" — adaptive behaves like FIFO when there is no
+   congestion. 0% loss.
+3. **Studio, switch to Heavy, run again** — the queue fills, red drops
+   appear, the decision line shows "over 80% full → aggressive", and the
+   explanation reports the real loss.
+4. **Deep Analysis, Mode A, Heavy** — read the "What do these results
+   mean?" box: identical loss for all three (shared admission rule), Static
+   priority's 197-step background wait vs. Adaptive's ~20, and the worst
+   case 298 vs. 22 steps.
+5. **Deep Analysis, Mode B, Heavy** — the per-class trade-off: Gaming and
+   Video protected, Background sacrificed, overall loss unchanged.
+6. Open **Method & definitions** at the bottom of Deep Analysis for the
+   formulas and the worked example.
 
 ## 14. Limitations
 
