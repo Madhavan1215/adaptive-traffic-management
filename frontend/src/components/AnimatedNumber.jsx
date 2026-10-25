@@ -1,32 +1,18 @@
-import { animate, useReducedMotion } from 'motion/react'
-import { useEffect, useRef } from 'react'
+import { motion } from 'motion/react'
 
-/** Counts from the previous value to the new one when results change. */
+/** Always renders the true value immediately; only its appearance is animated.
+ * (A count-up would show stale numbers whenever animation frames are paused.) */
 export default function AnimatedNumber({ value, format }) {
-  const ref = useRef(null)
-  const previous = useRef(0)
-  const reduceMotion = useReducedMotion()
-
-  useEffect(() => {
-    const node = ref.current
-    const from = previous.current
-    previous.current = value
-    if (!node) return undefined
-    if (reduceMotion || !Number.isFinite(value) || from === value) {
-      node.textContent = format(value)
-      return undefined
-    }
-    const controls = animate(from, value, {
-      duration: 0.7,
-      ease: [0.22, 1, 0.36, 1],
-      onUpdate: (v) => {
-        node.textContent = format(v)
-      },
-    })
-    return () => controls.stop()
-    // `format` is intentionally excluded: callers pass inline functions.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, reduceMotion])
-
-  return <span ref={ref}>{format(value)}</span>
+  const text = format(value)
+  return (
+    <motion.span
+      key={text}
+      className="inline-block"
+      initial={{ opacity: 0.3, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: 'easeOut' }}
+    >
+      {text}
+    </motion.span>
+  )
 }

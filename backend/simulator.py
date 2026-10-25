@@ -183,6 +183,11 @@ def run_simulation(
         if t < replay_steps:
             replay.append(_replay_frame(t, utilisation, config, arrivals_by_step[t], dropped_now, served_now, queue))
 
+    # Packets still waiting when arrivals stop were neither delivered nor
+    # dropped; label them so every generated packet has exactly one outcome.
+    for packet in queue:
+        packet.outcome = "queued_at_end"
+
     return SimulationResult(
         config=config, packets=all_packets, utilisation_history=utilisation_history, replay=replay
     )

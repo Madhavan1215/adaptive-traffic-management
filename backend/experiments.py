@@ -97,6 +97,11 @@ def summarize(result: SimulationResult) -> dict:
         "packets_generated": len(packets),
         "packets_delivered": sum(1 for p in packets if p.outcome == "delivered"),
         "packets_dropped": sum(1 for p in packets if p.outcome == "dropped"),
+        "packets_queued_at_end": sum(1 for p in packets if p.outcome == "queued_at_end"),
+        "generated_by_class": {tc.value: sum(1 for p in packets if p.traffic_class == tc) for tc in TrafficClass},
+        "delivered_by_class": {
+            tc.value: sum(1 for p in packets if p.traffic_class == tc and p.outcome == "delivered") for tc in TrafficClass
+        },
         "packet_loss_rate": packet_loss_rate(packets),
         "packet_loss_rate_by_class": {tc.value: v for tc, v in packet_loss_rate_by_class(packets).items()},
         "average_queueing_delay": average_queueing_delay(packets),

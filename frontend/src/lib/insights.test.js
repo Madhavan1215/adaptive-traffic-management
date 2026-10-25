@@ -5,7 +5,47 @@ import compareALight from './__fixtures__/compare_a_light.json'
 import compareBHeavy from './__fixtures__/compare_b_heavy.json'
 import simHeavy from './__fixtures__/simulate_heavy_static.json'
 import simLight from './__fixtures__/simulate_light_static.json'
-import { analysisInsights, studioInsights } from './insights'
+import studioFifoModerate from './__fixtures__/studio_fifo_moderate.json'
+import studioStaticHeavy from './__fixtures__/studio_static_priority_heavy.json'
+import studioStaticModerate from './__fixtures__/studio_static_priority_moderate.json'
+import { analysisInsights, strategySwitchInsight, studioInsights } from './insights'
+
+describe('strategySwitchInsight', () => {
+  const fifo = { summary: studioFifoModerate.summary, ranConfig: studioFifoModerate.config }
+  const stat = { summary: studioStaticModerate.summary, ranConfig: studioStaticModerate.config }
+
+  it('explains why delivered and dropped stay the same when only the strategy changes', () => {
+    expect(fifo.summary.packets_delivered).toBe(stat.summary.packets_delivered)
+    const insight = strategySwitchInsight(fifo, stat)
+    expect(insight.from).toBe('FIFO')
+    expect(insight.text).toContain('did not change how many packets were delivered (23) or dropped (0)')
+  })
+
+  it('stays silent when other settings changed too', () => {
+    const heavy = { summary: studioStaticHeavy.summary, ranConfig: studioStaticHeavy.config }
+    expect(strategySwitchInsight(fifo, heavy)).toBeNull()
+  })
+
+  it('stays silent when the strategy did not change', () => {
+    expect(strategySwitchInsight(stat, stat)).toBeNull()
+    expect(strategySwitchInsight(null, stat)).toBeNull()
+  })
+})
+
+describe('studioInsights on a small Studio run', () => {
+  it('reports packets still waiting at the end', () => {
+    const s = studioStaticHeavy.summary
+    expect(s.packets_delivered + s.packets_dropped + s.packets_queued_at_end).toBe(s.packets_generated)
+    expect(texts(studioInsights(s))).toContain(`${s.packets_queued_at_end} packets were still waiting`)
+  })
+
+  it('names traffic types that were never sent', () => {
+    const s = studioStaticHeavy.summary
+    expect(s.delivered_by_class.file_transfer).toBe(0)
+    expect(s.delivered_by_class.background).toBe(0)
+    expect(texts(studioInsights(s))).toContain('No File Transfer or Background packets were sent at all')
+  })
+})
 
 const texts = (items) => items.map((i) => i.text).join('\n')
 

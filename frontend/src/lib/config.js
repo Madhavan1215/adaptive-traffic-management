@@ -4,11 +4,14 @@
 
 import { TRAFFIC_CLASSES } from '../constants'
 
+// Small by default so the whole run can be watched step by step in the replay
+// (moderate traffic over 25 steps is about 24 packets). Deep Analysis keeps
+// the longer 500-step scenarios, where averages are statistically meaningful.
 export const CONFIG_DEFAULTS = {
   scheduler: 'adaptive_priority',
-  queue_capacity: 20,
+  queue_capacity: 5,
   service_rate: 1,
-  duration: 500,
+  duration: 25,
   alpha: 0.5,
   seed: 42,
   drop_policy: 'tail_drop',
@@ -17,9 +20,9 @@ export const CONFIG_DEFAULTS = {
 export const DEFAULT_PRESET = 'moderate'
 
 export const LIMITS = {
-  queue_capacity: { min: 5, max: 50, step: 1 },
+  queue_capacity: { min: 2, max: 20, step: 1 },
   service_rate: { min: 1, max: 5, step: 1 },
-  duration: { min: 100, max: 2000, step: 100 },
+  duration: { min: 10, max: 100, step: 5 },
   alpha: { min: 0, max: 3, step: 0.05 },
   arrival_rate: { min: 0, max: 1, step: 0.01 },
   seed: { min: 0, max: 1_000_000 },

@@ -276,7 +276,7 @@ function AdvancedSettings({ config, dispatch, setField }) {
         {...LIMITS.duration}
         onChange={setField('duration')}
         format={(v) => `${v} steps`}
-        hint="Metrics cover every step; the replay shows the first 100."
+        hint="How many time steps packets keep arriving. The replay shows every step."
       />
 
       <div>

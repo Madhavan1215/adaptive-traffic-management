@@ -52,7 +52,7 @@ adaptive-traffic-management/
 │   ├── experiments.py    Scenarios, Mode A/B comparisons, CSV export
 │   ├── run_experiments.py  Regenerates results/ from scratch
 │   ├── requirements.txt
-│   └── tests/            86 pytest tests (engine, metrics, experiments, API)
+│   └── tests/            88 pytest tests (engine, metrics, experiments, API)
 ├── frontend/
 │   └── src/
 │       ├── pages/        Home, Studio, Analysis (Deep Analysis)
@@ -78,6 +78,15 @@ simulation loop; the Studio's queue animation plays back exactly those
 events. `/api/compare` returns each policy's utilisation history for the
 over-time chart. All explanatory sentences in the UI are generated from the
 returned numbers (`frontend/src/lib/insights.js`).
+
+**Run sizes.** The Studio defaults to a small, watchable run — 25 steps with
+a 5-packet queue (about 24 packets at moderate traffic) — and the replay
+covers every step. Deep Analysis keeps the 500-step scenarios, because
+averages over a few dozen packets are too noisy to compare policies fairly.
+
+**Packet outcomes.** Every packet ends as *delivered*, *dropped*, or
+*still queued at the end* (it was waiting when arrivals stopped). The three
+always add up to the number generated; loss rate counts only dropped packets.
 
 ## 4. Algorithms
 
@@ -208,7 +217,7 @@ source .venv/bin/activate
 pytest -q
 ```
 
-86 tests (`test_traffic.py`, `test_schedulers.py`, `test_simulator.py`,
+88 tests (`test_traffic.py`, `test_schedulers.py`, `test_simulator.py`,
 `test_metrics.py`, `test_experiments.py`, `test_api.py`), all passing as of
 the last run. Coverage includes FIFO order, static-priority ordering and
 starvation risk, adaptive behaviour at each congestion tier, adaptive

@@ -132,14 +132,26 @@ def test_every_packet_has_exactly_one_final_outcome():
     for scheduler in ("fifo", "static_priority", "adaptive_priority"):
         result = run_simulation(_small_config(scheduler=scheduler))
         for p in result.packets:
-            assert p.outcome in ("delivered", "dropped")
+            assert p.outcome in ("delivered", "dropped", "queued_at_end")
+
+
+def test_packets_left_in_queue_at_the_end_are_accounted_for():
+    """Under overload the run ends with packets still waiting; they must be
+    labelled, so delivered + dropped + still-queued always equals generated."""
+    config = _small_config(queue_capacity=5, duration=25, arrival_rates={TrafficClass.VOICE: 0.9, TrafficClass.BACKGROUND: 0.9})
+    result = run_simulation(config)
+    outcomes = [p.outcome for p in result.packets]
+    assert set(outcomes) <= {"delivered", "dropped", "queued_at_end"}
+    assert outcomes.count("queued_at_end") > 0
+    assert outcomes.count("queued_at_end") <= config.queue_capacity
 
 
 def test_no_double_counting_total_packets_equals_delivered_plus_dropped():
     result = run_simulation(_small_config(scheduler="adaptive_priority", drop_policy="priority_displace"))
     delivered = sum(1 for p in result.packets if p.outcome == "delivered")
     dropped = sum(1 for p in result.packets if p.outcome == "dropped")
-    assert delivered + dropped == len(result.packets)
+    queued = sum(1 for p in result.packets if p.outcome == "queued_at_end")
+    assert delivered + dropped + queued == len(result.packets)
 
 
 def test_queueing_delay_never_negative():

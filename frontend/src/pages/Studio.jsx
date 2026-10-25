@@ -93,7 +93,7 @@ function StudioBody({ backend, studio, onNavigate }) {
           previewCapacity={config.queue_capacity}
         />
 
-        {run.result && <ResultSummary result={run.result} ranConfig={run.ranConfig} onNavigate={onNavigate} />}
+        {run.result && <ResultSummary result={run.result} ranConfig={run.ranConfig} previous={run.previous} onNavigate={onNavigate} />}
       </div>
     </div>
   )

@@ -54,6 +54,8 @@ export function useStudio(presets) {
         ranConfig: submitted,
         elapsedMs: performance.now() - startedAt,
         runId: (r.runId ?? 0) + 1,
+        // Kept so the Studio can compare strategies on the same traffic.
+        previous: r.result ? { summary: r.result.summary, ranConfig: r.ranConfig } : null,
       }))
     } catch (err) {
       // Keep the previous result visible; never substitute fallback numbers.

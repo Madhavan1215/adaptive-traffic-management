@@ -44,6 +44,13 @@ def test_mode_b_displacement_can_reduce_high_priority_loss():
     assert voice_loss_protected <= voice_loss_baseline
 
 
+def test_summary_counts_add_up_to_generated():
+    for r in run_mode_a_scheduling_only("heavy", seed=42).values():
+        assert r["packets_delivered"] + r["packets_dropped"] + r["packets_queued_at_end"] == r["packets_generated"]
+        assert sum(r["generated_by_class"].values()) == r["packets_generated"]
+        assert sum(r["delivered_by_class"].values()) == r["packets_delivered"]
+
+
 def test_scenarios_have_increasing_offered_load():
     def total_rate(name):
         return sum(SCENARIOS[name]["arrival_rates"].values())

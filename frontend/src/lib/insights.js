@@ -2,8 +2,36 @@
 // Every sentence is conditional on the numbers; nothing claims an algorithm
 // is better in general.
 
-import { CLASS_BY_KEY, POLICY_INFO, TRAFFIC_CLASSES } from '../constants'
+import { CLASS_BY_KEY, POLICY_INFO, SCHEDULER_BY_KEY, TRAFFIC_CLASSES } from '../constants'
+import { sameRequest } from './config'
 import { count, displacedCount, fixed, pct, steps } from './format'
+
+/**
+ * When the only setting that changed since the previous run is the
+ * scheduling strategy, explain what that switch did (and did not) change.
+ * Returns null when the two runs are not a like-for-like strategy switch.
+ */
+export function strategySwitchInsight(previous, current) {
+  if (!previous || !current) return null
+  const a = previous.ranConfig
+  const b = current.ranConfig
+  if (a.scheduler === b.scheduler || !sameRequest({ ...a, scheduler: b.scheduler }, b)) return null
+
+  const from = SCHEDULER_BY_KEY[a.scheduler].label
+  const to = SCHEDULER_BY_KEY[b.scheduler].label
+  const p = previous.summary
+  const c = current.summary
+  if (p.packets_delivered === c.packets_delivered && p.packets_dropped === c.packets_dropped) {
+    return {
+      from,
+      text: `Switching from ${from} to ${to} did not change how many packets were delivered (${count(c.packets_delivered)}) or dropped (${count(c.packets_dropped)}). With the same arrivals, queue size and drop rule, the network sends the same number of packets each step, so the queue is equally full whatever the strategy. The strategy only decides which waiting packet goes first — compare the waiting times by traffic type.`,
+    }
+  }
+  return {
+    from,
+    text: `Switching from ${from} to ${to} changed delivered packets from ${count(p.packets_delivered)} to ${count(c.packets_delivered)} and dropped packets from ${count(p.packets_dropped)} to ${count(c.packets_dropped)}.`,
+  }
+}
 
 const EPS = 1e-9
 
@@ -40,7 +68,23 @@ export function studioInsights(summary) {
     out.push({ tone: 'warn', text })
   }
 
-  const delivered = summary.throughput_by_class
+  if (summary.packets_queued_at_end > 0) {
+    out.push({
+      tone: 'neutral',
+      text: `${count(summary.packets_queued_at_end)} ${summary.packets_queued_at_end === 1 ? 'packet was' : 'packets were'} still waiting in the queue when the run ended, so they count as neither delivered nor dropped.`,
+    })
+  }
+
+  const delivered = summary.delivered_by_class
+  const generated = summary.generated_by_class
+  const unserved = TRAFFIC_CLASSES.filter((c) => generated[c.key] > 0 && delivered[c.key] === 0)
+  if (unserved.length > 0) {
+    out.push({
+      tone: 'warn',
+      text: `No ${unserved.map((c) => c.label).join(' or ')} packets were sent at all — every one that arrived was dropped or still waiting at the end.`,
+    })
+  }
+
   if (delivered.voice > 0 && delivered.background > 0) {
     const v = summary.average_queueing_delay_by_class.voice
     const b = summary.average_queueing_delay_by_class.background

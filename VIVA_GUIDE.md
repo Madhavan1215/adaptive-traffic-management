@@ -127,6 +127,22 @@ Background (60.7% → 98.1%) lose more. Voice gains nothing because
 scheduling alone already gave it 0% loss. It is a trade-off between classes,
 not an improvement, and the project reports it that way.
 
+### In the Studio, why do delivered and dropped stay the same when I switch strategy?
+
+For the same reason as the next answer: same arrivals, same queue size, same
+network speed and the same tail-drop rule mean the queue is equally full at
+every step, so the same arrivals are turned away and the same number of
+packets are sent. What the strategy changes is *which* packet is sent, so
+look at waiting time per traffic type — e.g. at heavy load (25 steps, queue
+of 5, seed 42) Voice waits 3.2 steps under FIFO but 0.2 under Static
+priority, while Static sends no File Transfer or Background packets at all.
+
+### Why does "delivered + dropped" not equal "generated"?
+
+Packets still in the queue when arrivals stop were neither sent nor dropped.
+The simulator labels them "still queued at the end", so delivered + dropped
++ still queued always equals generated.
+
 ### Why is queue occupancy identical for every scheduler in Mode A?
 
 In Mode A every policy sends exactly `service_rate` packets per step whenever
